@@ -125,6 +125,7 @@ class path_planner:
         else:
             return False
 
+    ## Ensure line does not go through obstacles
     def _line_is_free(self, n1, n2):
         points = bresenham(n1.map_i, n1.map_j, n2.map_i, n2.map_j)
         for (i, j) in points:
@@ -132,6 +133,7 @@ class path_planner:
                 return False
         return True
 
+    ## Breadth-First Search from Start to Goal
     def _bfs_search(self, start, goal):
         from collections import deque
 
@@ -154,7 +156,7 @@ class path_planner:
         if goal not in parent:
             return None
 
-        # reconstruct path
+        # Reconstruct Path
         path = []
         node = goal
         while node:
@@ -175,13 +177,13 @@ class path_planner:
         for _ in range(num_samples):
             if random.random() < 0.35:
                 # Sample in a shrinking radius around goal
-                radius = 50   # you may tune this
+                radius = 50   # Tune Radius!!!
                 gi, gj = self.goal_node.map_i, self.goal_node.map_j
 
                 ri = int(gi + random.randint(-radius, radius))
                 rj = int(gj + random.randint(-radius, radius))
 
-                # clamp inside map
+                # Set Map Boundaries
                 if ri < 0: ri = 0
                 if ri >= self.map_width: ri = self.map_width - 1
                 if rj < 0: rj = 0
@@ -197,28 +199,28 @@ class path_planner:
 
             nodes.append(prm_node(ri, rj))
 
-        ### ------------------------------------------
-        ### --- KDTree for fast nearest neighbors ---
-        ### ------------------------------------------
+        ## KD-Tree Implementation
         node_points = [(n.map_i, n.map_j) for n in nodes]
         kdtree = KDTree(node_points)
 
-        ## Connect nearest neighbors USING KD-TREE
-        for idx, node in enumerate(nodes):
+        ## Connect nearest neighbors USING KD-Tree
+        for idx, node in enumerate(nodes): # Sets loop to occur for all Nodes created
 
-            # query K_neighbors+1 because KDTree includes the point itself
+            # Set the KD-Tree Query size to the neighboring nodes + 1 (The node itself)
             dists, neighbor_indices = kdtree.query(node_points[idx], k=K_neighbors+1)
 
-            # make neighbor_indices always iterable (when k == 1, KDTree returns scalars)
+            # Always output a LIST, so that the loops can iterate
             if K_neighbors+1 == 1:
                 neighbor_indices = [neighbor_indices]
             else:
                 # ensure it's a list, not a numpy scalar
                 neighbor_indices = list(np.atleast_1d(neighbor_indices))
 
-            # skip itself
+            # KD-Tree includes the initial Node itself, so skip that one
+            # The self-Node is always first since the distance is zero
             neighbor_indices = neighbor_indices[1:]
 
+            # For each neighbor, add an edge if the line connecting the Nodes is unobstructed
             for ni in neighbor_indices:
                 nb = nodes[ni]
                 if self._line_is_free(node, nb):
