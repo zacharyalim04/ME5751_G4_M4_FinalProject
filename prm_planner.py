@@ -182,9 +182,9 @@ class path_planner:
         
         ## Generate random samples
         for _ in range(num_samples):
-            if random.random() < 0.35:
+            if random.random() < 0.7:
                 # Sample in a shrinking radius around goal
-                radius = 50   # Tune Radius!!!
+                radius = 10   # TUNE THIS RADIUS!!!
                 gi, gj = self.goal_node.map_i, self.goal_node.map_j
 
                 ri = int(gi + random.randint(-radius, radius))
