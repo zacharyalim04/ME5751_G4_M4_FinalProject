@@ -206,6 +206,56 @@ class path_planner:
 
             nodes.append(prm_node(ri, rj))
             nodes_generated += 1 
+
+        # Boundary Sampling for narrow corridors
+        boundary_samples = 400  # TUNE THE BOUNDARY SAMPLES
+        for _ in range(boundary_samples):
+
+            # pick a random pixel
+            ri = random.randint(1, self.map_width - 2)
+            rj = random.randint(1, self.map_height - 2)
+
+            # skip if obstacle
+            if self.costmap.costmap[ri][rj] >= 255:
+                continue
+
+            # check if neighbor is obstacle → then ri,rj is ON boundary
+            if (self.costmap.costmap[ri+1][rj] >= 255 or
+                self.costmap.costmap[ri-1][rj] >= 255 or
+                self.costmap.costmap[ri][rj+1] >= 255 or
+                self.costmap.costmap[ri][rj-1] >= 255):
+
+                nodes.append(prm_node(ri, rj))
+                nodes_generated += 1
+        
+        # Narrow-Passage Sampling (Inflation-difference method)
+        inflation = 3  # tune based on passage width
+        narrow_samples = 200
+
+        # Create a slightly inflated binary obstacle map
+        kernel = np.ones((inflation, inflation), np.uint8)
+        obs = (self.costmap.costmap >= 255).astype(np.uint8)
+        inflated = cv2.dilate(obs, kernel)
+
+        # Regions that appear ONLY in inflated map are narrow passage borders
+        narrow_mask = (inflated == 1) & (obs == 0)
+
+        # Collect candidate coordinates
+        narrow_coords = np.argwhere(narrow_mask)
+
+        for _ in range(narrow_samples):
+            if len(narrow_coords) == 0:
+                break
+            idx = random.randint(0, len(narrow_coords)-1)
+            mi, mj = narrow_coords[idx]
+
+            # Double check: ensure free space
+            if self.costmap.costmap[mi][mj] >= 255:
+                continue
+
+            nodes.append(prm_node(mi, mj))
+            nodes_generated += 1
+
         print(f"Nodes Generated: {nodes_generated}")
 
         ## KD-Tree Implementation
