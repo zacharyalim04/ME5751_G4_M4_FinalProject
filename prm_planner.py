@@ -141,8 +141,12 @@ class path_planner:
         visited = set([start])
         parent = {start: None}
 
+        nodes_searched = 0 # How many Nodes were SEARCHED
+
         while queue:
             curr = queue.popleft()
+            nodes_searched += 1
+
             if curr == goal:
                 break
             
@@ -152,6 +156,7 @@ class path_planner:
                     visited.add(nxt)
                     parent[nxt] = curr
                     queue.append(nxt)
+        print(f"Nodes Searched: {nodes_searched}")
 
         if goal not in parent:
             return None
@@ -172,6 +177,8 @@ class path_planner:
         nodes = self.pTree.nodes # Start and goal already in here
 
         self.path.clear_path() # Clear old path
+
+        nodes_generated = 0 # How many nodes were CREATED
         
         ## Generate random samples
         for _ in range(num_samples):
@@ -198,6 +205,8 @@ class path_planner:
                 continue
 
             nodes.append(prm_node(ri, rj))
+            nodes_generated += 1 
+        print(f"Nodes Generated: {nodes_generated}")
 
         ## KD-Tree Implementation
         node_points = [(n.map_i, n.map_j) for n in nodes]
