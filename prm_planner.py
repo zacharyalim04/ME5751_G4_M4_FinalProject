@@ -169,184 +169,208 @@ class path_planner:
             node = parent[node]
         return list(reversed(path))
 
+    # Create shortcut if shortcut exists
+    def _shortcut_path(self, nodes):
+        if not nodes:
+            return nodes
+        
+        new_path = [nodes[0]]
+        i = 0
+        while i < len(nodes) - 1:
+            j = len(nodes) - 1
+            while j > i + 1:
+                if self._line_is_free(nodes[i], nodes[j]):
+                    new_path.append(nodes[j])
+                    i = j
+                    break
+                j -= 1
+            else:
+                new_path.append(nodes[i + 1])
+                i += 1
+
+        return new_path        
 
     def plan_path(self):
-        ## Define other variables needed for path planning
-        num_samples = 300 # Number of Random Nodes to create
-        K_neighbors = 10 # Number of connections per node
-        nodes = self.pTree.nodes # Start and goal already in here
+        # Retry until a valid path is found
+        max_attempts = 50
+        attempt = 0
 
-        self.path.clear_path() # Clear old path
+        while attempt < max_attempts:
+            attempt += 1
+            print(f"Planning attempt {attempt}")
 
-        nodes_generated = 0 # How many nodes were CREATED
-        
-        ## Generate random samples
-        for _ in range(num_samples):
-            if random.random() < 0.7:
-                # Sample in a shrinking radius around goal
-                radius = 10   # TUNE THIS RADIUS!!!
-                gi, gj = self.goal_node.map_i, self.goal_node.map_j
+            ## Define other variables needed for path planning
+            num_samples = 300 # Number of Random Nodes to create
+            K_neighbors = 10 # Number of connections per node
+            nodes = self.pTree.nodes # Start and goal already in here
 
-                ri = int(gi + random.randint(-radius, radius))
-                rj = int(gj + random.randint(-radius, radius))
+            self.path.clear_path() # Clear old path
 
-                # Set Map Boundaries
-                if ri < 0: ri = 0
-                if ri >= self.map_width: ri = self.map_width - 1
-                if rj < 0: rj = 0
-                if rj >= self.map_height: rj = self.map_height - 1
-            else:
-                # regular uniform sampling
-                ri = random.randint(0, self.map_width-1)
-                rj = random.randint(0, self.map_height-1)
+            nodes_generated = 0 # How many nodes were CREATED
+            
+            ## Generate random samples
+            for _ in range(num_samples):
+                if random.random() < 0.7:
+                    # Sample in a shrinking radius around goal
+                    radius = 10   # TUNE THIS RADIUS!!!
+                    gi, gj = self.goal_node.map_i, self.goal_node.map_j
 
-            # Skip obstacles
-            if self.costmap.costmap[ri][rj] >= 255:
-                continue
+                    ri = int(gi + random.randint(-radius, radius))
+                    rj = int(gj + random.randint(-radius, radius))
 
-            nodes.append(prm_node(ri, rj))
-            nodes_generated += 1 
+                    # Set Map Boundaries
+                    if ri < 0: ri = 0
+                    if ri >= self.map_width: ri = self.map_width - 1
+                    if rj < 0: rj = 0
+                    if rj >= self.map_height: rj = self.map_height - 1
+                else:
+                    # regular uniform sampling
+                    ri = random.randint(0, self.map_width-1)
+                    rj = random.randint(0, self.map_height-1)
 
-        # Boundary Sampling for narrow corridors
-        boundary_samples = 400  # TUNE THE BOUNDARY SAMPLES
-        for _ in range(boundary_samples):
-
-            # pick a random pixel
-            ri = random.randint(1, self.map_width - 2)
-            rj = random.randint(1, self.map_height - 2)
-
-            # skip if obstacle
-            if self.costmap.costmap[ri][rj] >= 255:
-                continue
-
-            # check if neighbor is obstacle → then ri,rj is ON boundary
-            if (self.costmap.costmap[ri+1][rj] >= 255 or
-                self.costmap.costmap[ri-1][rj] >= 255 or
-                self.costmap.costmap[ri][rj+1] >= 255 or
-                self.costmap.costmap[ri][rj-1] >= 255):
+                # Skip obstacles
+                if self.costmap.costmap[ri][rj] >= 255:
+                    continue
 
                 nodes.append(prm_node(ri, rj))
+                nodes_generated += 1 
+
+            # Boundary Sampling for narrow corridors
+            boundary_samples = 400  # TUNE THE BOUNDARY SAMPLES
+            for _ in range(boundary_samples):
+
+                # pick a random pixel
+                ri = random.randint(1, self.map_width - 2)
+                rj = random.randint(1, self.map_height - 2)
+
+                # skip if obstacle
+                if self.costmap.costmap[ri][rj] >= 255:
+                    continue
+
+                # check if neighbor is obstacle → then ri,rj is ON boundary
+                if (self.costmap.costmap[ri+1][rj] >= 255 or
+                    self.costmap.costmap[ri-1][rj] >= 255 or
+                    self.costmap.costmap[ri][rj+1] >= 255 or
+                    self.costmap.costmap[ri][rj-1] >= 255):
+
+                    nodes.append(prm_node(ri, rj))
+                    nodes_generated += 1
+            
+            # Narrow-Passage Sampling (Inflation-difference method)
+            inflation = 3  # tune based on passage width
+            narrow_samples = 200
+
+            # Create a slightly inflated binary obstacle map
+            kernel = np.ones((inflation, inflation), np.uint8)
+            obs = (self.costmap.costmap >= 255).astype(np.uint8)
+            inflated = cv2.dilate(obs, kernel)
+
+            # Regions that appear ONLY in inflated map are narrow passage borders
+            narrow_mask = (inflated == 1) & (obs == 0)
+
+            # Collect candidate coordinates
+            narrow_coords = np.argwhere(narrow_mask)
+
+            for _ in range(narrow_samples):
+                if len(narrow_coords) == 0:
+                    break
+                idx = random.randint(0, len(narrow_coords)-1)
+                mi, mj = narrow_coords[idx]
+
+                # Double check: ensure free space
+                if self.costmap.costmap[mi][mj] >= 255:
+                    continue
+
+                nodes.append(prm_node(mi, mj))
                 nodes_generated += 1
-        
-        # Narrow-Passage Sampling (Inflation-difference method)
-        inflation = 3  # tune based on passage width
-        narrow_samples = 200
 
-        # Create a slightly inflated binary obstacle map
-        kernel = np.ones((inflation, inflation), np.uint8)
-        obs = (self.costmap.costmap >= 255).astype(np.uint8)
-        inflated = cv2.dilate(obs, kernel)
+            print(f"Nodes Generated: {nodes_generated}")
 
-        # Regions that appear ONLY in inflated map are narrow passage borders
-        narrow_mask = (inflated == 1) & (obs == 0)
+            ## KD-Tree Implementation
+            node_points = [(n.map_i, n.map_j) for n in nodes]
+            kdtree = KDTree(node_points)
 
-        # Collect candidate coordinates
-        narrow_coords = np.argwhere(narrow_mask)
+            ## Connect nearest neighbors USING KD-Tree
+            for idx, node in enumerate(nodes): # Sets loop to occur for all Nodes created
 
-        for _ in range(narrow_samples):
-            if len(narrow_coords) == 0:
-                break
-            idx = random.randint(0, len(narrow_coords)-1)
-            mi, mj = narrow_coords[idx]
+                # Set the KD-Tree Query size to the neighboring nodes + 1 (The node itself)
+                dists, neighbor_indices = kdtree.query(node_points[idx], k=K_neighbors+1)
 
-            # Double check: ensure free space
-            if self.costmap.costmap[mi][mj] >= 255:
+                # Always output a LIST, so that the loops can iterate
+                if K_neighbors+1 == 1:
+                    neighbor_indices = [neighbor_indices]
+                else:
+                    # ensure it's a list, not a numpy scalar
+                    neighbor_indices = list(np.atleast_1d(neighbor_indices))
+
+                # KD-Tree includes the initial Node itself, so skip that one
+                # The self-Node is always first since the distance is zero
+                neighbor_indices = neighbor_indices[1:]
+
+                # For each neighbor, add an edge if the line connecting the Nodes is unobstructed
+                for ni in neighbor_indices:
+                    nb = nodes[ni]
+                    if self._line_is_free(node, nb):
+                        self.pTree.add_edges(node, nb)
+            
+            ## Breadth-First Search through generated Roadmap
+            path_nodes = self._bfs_search(self.start_node, self.goal_node)
+
+            # If BFS failed → retry
+            if not path_nodes:
+                print("No path found, retrying...")
+                # Reset roadmap before next attempt
+                self.pTree = prm_tree()
+                self.pTree.add_nodes(self.start_node)
+                self.pTree.add_nodes(self.goal_node)
+                continue  # restart loop
+
+            # Use shortcut to remove unnecessary nodes in list
+            path_nodes = self._shortcut_path(path_nodes)
+
+            # If shortcut empties path (rare), retry
+            if not path_nodes:
+                print("Shortcut collapsed path, retrying...")
+                self.pTree = prm_tree()
+                self.pTree.add_nodes(self.start_node)
+                self.pTree.add_nodes(self.goal_node)
                 continue
 
-            nodes.append(prm_node(mi, mj))
-            nodes_generated += 1
+            ## Draw pixel path using Node Roadmap
+            ## FIRST: check if any node along the path has clear line-of-sight to goal
+            shortcut_index = None
+            for i, n in enumerate(path_nodes):
+                if self._line_is_free(n, self.goal_node):
+                    shortcut_index = i
+                    break
 
-        print(f"Nodes Generated: {nodes_generated}")
+            if shortcut_index is not None:
+                direct_node = path_nodes[shortcut_index]
 
-        ## KD-Tree Implementation
-        node_points = [(n.map_i, n.map_j) for n in nodes]
-        kdtree = KDTree(node_points)
+                ## draw path from start → node with shortcut
+                for a, b in zip(path_nodes[:shortcut_index], path_nodes[1:shortcut_index+1]):
+                    for pi, pj in bresenham(a.map_i, a.map_j, b.map_i, b.map_j):
+                        self.path.add_pose(Pose(map_i=pi, map_j=pj, theta=0))
 
-        ## Connect nearest neighbors USING KD-Tree
-        for idx, node in enumerate(nodes): # Sets loop to occur for all Nodes created
-
-            # Set the KD-Tree Query size to the neighboring nodes + 1 (The node itself)
-            dists, neighbor_indices = kdtree.query(node_points[idx], k=K_neighbors+1)
-
-            # Always output a LIST, so that the loops can iterate
-            if K_neighbors+1 == 1:
-                neighbor_indices = [neighbor_indices]
-            else:
-                # ensure it's a list, not a numpy scalar
-                neighbor_indices = list(np.atleast_1d(neighbor_indices))
-
-            # KD-Tree includes the initial Node itself, so skip that one
-            # The self-Node is always first since the distance is zero
-            neighbor_indices = neighbor_indices[1:]
-
-            # For each neighbor, add an edge if the line connecting the Nodes is unobstructed
-            for ni in neighbor_indices:
-                nb = nodes[ni]
-                if self._line_is_free(node, nb):
-                    self.pTree.add_edges(node, nb)
-        
-        ## Breadth-First Search through generated Roadmap
-        path_nodes = self._bfs_search(self.start_node, self.goal_node)
-
-        if not path_nodes:
-            print("There is no valid path through the PRM")
-            return
-        
-        ## Draw pixel path using Node Roadmap
-        ## FIRST: check if any node along the path has clear line-of-sight to goal
-        shortcut_index = None
-        for i, n in enumerate(path_nodes):
-            if self._line_is_free(n, self.goal_node):
-                shortcut_index = i
-                break
-
-        if shortcut_index is not None:
-            direct_node = path_nodes[shortcut_index]
-
-            ## draw path from start → node with shortcut
-            for a, b in zip(path_nodes[:shortcut_index], path_nodes[1:shortcut_index+1]):
-                for pi, pj in bresenham(a.map_i, a.map_j, b.map_i, b.map_j):
+                ## now draw direct line from that node → goal
+                for pi, pj in bresenham(direct_node.map_i, direct_node.map_j,
+                                        self.goal_node.map_i, self.goal_node.map_j):
                     self.path.add_pose(Pose(map_i=pi, map_j=pj, theta=0))
 
-            ## now draw direct line from that node → goal
-            for pi, pj in bresenham(direct_node.map_i, direct_node.map_j,
-                                    self.goal_node.map_i, self.goal_node.map_j):
-                self.path.add_pose(Pose(map_i=pi, map_j=pj, theta=0))
+            else:
+                ## No shortcut, draw full PRM path as usual
+                for a, b in zip(path_nodes[:-1], path_nodes[1:]):
+                    for pi, pj in bresenham(a.map_i, a.map_j, b.map_i, b.map_j):
+                        self.path.add_pose(Pose(map_i=pi, map_j=pj, theta=0))
+
+            self.path.save_path(file_name="Log\\prm_path.csv")
+
+            # If we reach here, we successfully built a path → exit retry loop
+            break
 
         else:
-            ## No shortcut, draw full PRM path as usual
-            for a, b in zip(path_nodes[:-1], path_nodes[1:]):
-                for pi, pj in bresenham(a.map_i, a.map_j, b.map_i, b.map_j):
-                    self.path.add_pose(Pose(map_i=pi, map_j=pj, theta=0))
+            print("Failed to find a path after maximum attempts.")
 
-        """
-        points = bresenham(self.start_node.map_i, self.start_node.map_j, ri, rj)
-        
-        hit_obstacle = False
-        for p in points:
-            if self.costmap.costmap[p[0]][p[1]] >= 255:
-                hit_obstacle = True
-                break
-
-        if(hit_obstacle == False):
-            random_node = prm_node(ri, rj)
-
-            self.pTree.add_nodes(random_node)
-            self.pTree.add_edges(self.start_node, random_node)
-
-            points = bresenham(self.start_node.map_i, self.start_node.map_j, random_node.map_i, random_node.map_j)
-            for p in points:
-                self.path.add_pose(Pose(map_i=p[0], map_j=p[1], theta=0))
-
-            points = bresenham(random_node.map_i, random_node.map_j, self.goal_node.map_i, self.goal_node.map_j)
-            for p in points:
-                self.path.add_pose(Pose(map_i=p[0], map_j=p[1], theta=0))
-
-            if self.check_vicinity(self.goal_node.map_i, self.goal_node.map_j, ri, rj, 2.0):
-                print("We hit goal!")
-        """
-
-        self.path.save_path(file_name="Log\\prm_path.csv")
 
 # bresenham algorithm for line generation on grid map
 # from http://www.roguebasin.com/index.php?title=Bresenham%27s_Line_Algorithm
