@@ -50,8 +50,8 @@ class E160_environment:
             
             self.robots.append(r)
 
-        self.robots[0].set_controller(controller(self.robots[0]))# set P_controller for controller 0
-
+        self.robots[0].set_controller(controller(self.robots[0]))
+        
 
     def update_robots(self, deltaT):
         

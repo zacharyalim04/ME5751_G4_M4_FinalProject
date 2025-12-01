@@ -205,10 +205,8 @@ class E160_graphics:
 		self.gui_stopped = True
 
 	def callback_left(self, event):
-		desired_points = self.reverse_scale_points([float(event.x), float(event.y)], self.scale)
-		robot = self.environment.robots[0]
-		robot.state_des.reset_destination(desired_points[0],desired_points[1],0)
-		print("New clicked robot travel target", robot.state_des.x, robot.state_des.y)
+		# Disable left-click destination changes so PRM path stays intact
+		print("Left click ignored (PRM path is controlling the robot)")
 
 
 	def callback_right(self, event):
@@ -219,6 +217,8 @@ class E160_graphics:
 		self.path.plan_path()
 		self.path._show_path()
 
+		# update controller with fresh PRM path
+		self.environment.robots[0].controller.set_goal_points()
 
 	def send_robot_commands(self):
 		# # check to see if forward slider has changed

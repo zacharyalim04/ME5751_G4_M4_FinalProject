@@ -11,6 +11,7 @@ def main():
     # instantiate robot navigation classes
     environment = E160_environment(deltaT)
     graphics = E160_graphics(environment)
+    environment.robots[0].controller.attach_graphics(graphics)
     
     # loop over time
     while True:

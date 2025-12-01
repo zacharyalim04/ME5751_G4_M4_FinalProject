@@ -174,7 +174,7 @@ class E160_des_state:
 		self.x.append(x)
 		self.y.append(y)
 		self.theta.append(theta)
-		print(str(x)+" "+str(y)+" "+str(theta)+"  is added to destination list")
+		# print(str(x)+" "+str(y)+" "+str(theta)+"  is added to destination list")
 
 
 	def get_des_size(self):

@@ -10,109 +10,274 @@ import time
 class controller:
 
     def __init__(self, robot, logging=False):
+        self.graphics = None
+
         self.robot = robot  # do not delete this line
-        self.kp = 0  # k_rho
-        self.ka = 0  # k_alpha
-        self.kb = 0  # k_beta
+        self.kp = 6   # k_rho
+        self.ka = 3   # k_alpha
+        self.kb = -0.3  # k_beta
         self.logging = logging
 
-        if (logging == True):
+        if logging:
             self.robot.make_headers(['pos_X', 'posY', 'posZ', 'vix', 'viy', 'wi', 'vr', 'wr'])
 
-        self.set_goal_points()
-
         # select the controller type
-        self.controller_type = 'p'
+        self.controller_type = 'a'
 
-    # self.controller_type='p'
+    def attach_graphics(self, graphics):
+        self.graphics = graphics   
+        self.set_goal_points() 
 
+    # --------------------------------------------------
+    # Load PRM path as goals for the controller
+    # --------------------------------------------------
     def set_goal_points(self):
-        '''
-        #Edit goal point list below, if you click a point using mouse, the points programmed
-        #will be washed out
-        '''
-        # here is the example of destination code
+        """
+        Load PRM path as goals for the controller.
+        """
+        import csv
 
-        ##
-        ##
-        ##
-        ## DELETE FROM THIS FILE AND PUT ONTO OUR CONTROLLER
-        self.robot.state_des.add_destination(x=100, y=20, theta=0)  # goal point 1
-        self.robot.state_des.add_destination(x=190, y=30, theta=1.57)  # goal point 2
-        ##
-        ##
-        ##
+        # Clear existing goals in E160_des_state
+        self.robot.state_des.x = []
+        self.robot.state_des.y = []
+        self.robot.state_des.theta = []
+        self.robot.state_des.p = 0
 
+        print("Loading PRM path...")
+
+        with open("Log/prm_path.csv", newline='') as f:
+            reader = csv.reader(f, delimiter="\t")
+
+            next(reader)  # skip header
+
+            for row in reader:
+                if len(row) < 3:
+                    continue
+
+                map_i = int(float(row[0]))
+                map_j = int(float(row[1]))
+                theta = float(row[2])
+
+                # Convert using PRM’s map2world
+                world_x, world_y = self.graphics.path.map2world(map_i, map_j)
+
+                self.robot.state_des.add_destination(x=world_x, y=world_y, theta=theta)
+
+        print("PRM path loaded successfully.")
+
+    # --------------------------------------------------
     def get_robot_state(self):
-        (c_posX, c_posY, c_theta) = self.robot.state.get_pos_state()  # get current position configuration
-        (c_vix, c_viy,
-         c_wi) = self.robot.state.get_global_vel_state()  # get current velocity configuration, in the global frame
-        (c_v, c_w) = self.robot.state.get_local_vel_state()  # get current local velocity configuration
+        (c_posX, c_posY, c_theta) = self.robot.state.get_pos_state()
+        (c_vix, c_viy, c_wi) = self.robot.state.get_global_vel_state()
+        (c_v, c_w) = self.robot.state.get_local_vel_state()
         return c_posX, c_posY, c_theta, c_vix, c_viy, c_wi, c_v, c_w
 
+    # --------------------------------------------------
     def track_point(self):
-        '''
+        """
         Main controller method for tracking point
-        '''
+        """
 
-        ## The following demonstrate how to get the state of the robot
+        # Debug if you want, but not every step:
+        # print("DEST INDEX:", self.robot.state_des.p)
+        # print("NUM DEST:", len(self.robot.state_des.x))
 
-        # All d_ means destination
-        (d_posX, d_posY, d_theta) = self.robot.state_des.get_des_state()  # get next destination configuration
+        # If no destinations loaded yet, don't run controller
+        if len(self.robot.state_des.x) == 0:
+            return False
 
-        # All c_ means current_
-        c_posX, c_posY, c_theta, c_vix, c_viy, c_wi, c_v, c_w = self.get_robot_state()  # get current robot state
+        # All waypoints already consumed
+        if self.robot.state_des.p >= len(self.robot.state_des.x):
+            # print("All waypoints completed; nothing left to track.")
+            self.robot.set_motor_control(0, 0)
+            return True
 
-        ## Most of your program should be here, compute rho, alpha and beta using d_pos and c_pos
-        if (self.controller_type == 'a'):
+        # Desired state
+        (d_posX, d_posY, d_theta) = self.robot.state_des.get_des_state()
+
+        # Current state
+        c_posX, c_posY, c_theta, c_vix, c_viy, c_wi, c_v, c_w = self.get_robot_state()
+
+
+        # --------------------------------------------------
+        # LOOKAHEAD-SELECTION: Pure Pursuit style tracking
+        # --------------------------------------------------
+
+        lookahead_dist = 30.0   # tune 60–120 px
+
+        # Find index of the closest waypoint to the robot
+        closest_idx = 0
+        best_dist = float('inf')
+        for i in range(len(self.robot.state_des.x)):
+            wx = self.robot.state_des.x[i]
+            wy = self.robot.state_des.y[i]
+            d = math.hypot(wx - c_posX, wy - c_posY)
+
+            if d < best_dist:
+                best_dist = d
+                closest_idx = i
+
+        # Now walk FORWARD along the path until we accumulate lookahead_dist
+        look_idx = closest_idx
+        accum = 0.0
+
+        for i in range(closest_idx, len(self.robot.state_des.x)-1):
+            x1, y1 = self.robot.state_des.x[i], self.robot.state_des.y[i]
+            x2, y2 = self.robot.state_des.x[i+1], self.robot.state_des.y[i+1]
+
+            seg = math.hypot(x2 - x1, y2 - y1)
+            accum += seg
+
+            if accum >= lookahead_dist:
+                look_idx = i + 1
+                break
+
+        # Clamp to final waypoint if we run out of path
+        look_idx = min(look_idx, len(self.robot.state_des.x)-1)
+
+        # This is the waypoint the robot should track
+        d_posX = self.robot.state_des.x[look_idx]
+        d_posY = self.robot.state_des.y[look_idx]
+        d_theta = self.robot.state_des.theta[look_idx]
+
+
+        # --------------------------------------------------
+        # “a” controller (unused but left intact)
+        # --------------------------------------------------
+        if self.controller_type == 'a':
+
+            # --- Position errors ---
             distX = d_posX - c_posX
             distY = d_posY - c_posY
             alpha = math.atan2(distY, distX)
-            distTheta = alpha - c_theta
-            distRho = math.hypot(distX, distY)
-            distTheta = math.atan2(math.sin(distTheta), math.cos(distTheta))  # Normalize to -pi to pi
-            goalAngle = d_theta - c_theta
-            goalAngle = math.atan2(math.sin(goalAngle), math.cos(goalAngle))  # Normalize to -pi to pi
-            # if it is "a controller", ensure the wheel speed is not violated, you need to
-            # 1. turn your robot to face the target position
-            if abs(distTheta) > 0.05:  # Within 0.05 rad, about 3 degree
-                self.robot.set_motor_control(0, 0.5)
-            # 2. move your robot forward to the target position
-            elif abs(distRho) > 0.1:  # Within 0.1 cm
-                self.robot.set_motor_control(10, 0)
-            # 3. turn your robot to face the target orientation
-            elif abs(goalAngle) > 0.05:  # Within 0.05 rad, about 3 degree
-                self.robot.set_motor_control(0, 0.5)
-            else:
-                self.robot.set_motor_control(0, 0)
-                print("Goal reached")
 
-        elif (self.controller_type == 'p'):
-            # use p control discussed in the class,
-            # set new c_v = k_rho*rho, c_w = k_alpha*alpha + k_beta*beta
+            distTheta = alpha - c_theta
+            distTheta = math.atan2(math.sin(distTheta), math.cos(distTheta))
+            distRho = math.hypot(distX, distY)
+
+            goalAngle = d_theta - c_theta
+            goalAngle = math.atan2(math.sin(goalAngle), math.cos(goalAngle))
+
+            # -------------------------------------------------
+            # FIX 4: "Stop Box" near final goal
+            # -------------------------------------------------
+            final_x = self.robot.state_des.x[-1]
+            final_y = self.robot.state_des.y[-1]
+            final_theta = self.robot.state_des.theta[-1]
+
+            final_dist = math.hypot(final_x - c_posX, final_y - c_posY)
+            final_angle_err = math.atan2(math.sin(final_theta - c_theta),
+                                        math.cos(final_theta - c_theta))
+
+            # If very close to final point: freeze lookahead and refine
+            if final_dist < 20: # TUNE FOR GOAL DISTANCE APPLICATION
+                d_posX = final_x
+                d_posY = final_y
+                d_theta = final_theta
+
+                goalAngle = math.atan2(math.sin(d_theta - c_theta),
+                           math.cos(d_theta - c_theta))
+
+                # If extremely close → fully stop
+                if final_dist < 8 and abs(final_angle_err) < 0.10:
+                    self.robot.set_motor_control(0, 0)
+                    print("Goal reached cleanly")
+                    self.robot.state_des.p = len(self.robot.state_des.x)
+                    return True
+
+            # --- BASIC PROPORTIONAL CONTROLLER ---
+            # angular velocity
+            c_w = 3.0 * distTheta * min(1.0, distRho / 40.0)       # ka = 3
+            # linear speed
+            c_v = 35.0 * math.tanh(distRho / 25.0)
+
+            # --- SLOW DOWN NEAR FINAL GOAL ---
+            goal_dist = math.hypot(self.robot.state_des.x[-1] - c_posX,
+                                self.robot.state_des.y[-1] - c_posY)
+
+            if goal_dist < 30:
+                c_v = max(8.0, 0.3 * goal_dist)
+
+            # -------------------------------------------
+            # FIX 3: Stronger final-orientation control
+            # -------------------------------------------
+            # When close to the final waypoint, blend in heading correction
+            if goal_dist < 30: # TUNE THE GOAL DISTANCE APPLICATION
+                w_goal = 2.0 * goalAngle      # try 1.5–3.0
+                blend = max(0.0, 1.0 - goal_dist / 80.0)   # fades in smoothly
+                c_w = (1 - blend) * c_w + blend * w_goal
+
+
+            # -------------------------------
+            # ACKERMANN STEERING LIMITS
+            # -------------------------------
+            if self.robot.state.vehicle == "v":
+                d = self.robot.state.d
+                beta_max = self.robot.state.beta_max
+
+                if abs(c_v) < 1e-3:
+                    beta = 0
+                else:
+                    beta = math.atan(c_w * d / c_v)
+
+                if abs(beta) > beta_max:
+                    beta = math.copysign(beta_max, beta)
+                    c_w = math.tan(beta) * c_v / d
+
+            # send the valid control
+            self.robot.set_motor_control(c_v, c_w)
+
+            return False
+
+
+        # --------------------------------------------------
+        # P controller that tracks PRM waypoints
+        # --------------------------------------------------
+        elif self.controller_type == 'p':
 
             distX = d_posX - c_posX
             distY = d_posY - c_posY
-            distRho = math.hypot(distX, distY)  # shortest distance to goal
+            distRho = math.hypot(distX, distY)  # distance to goal
 
-            alpha = math.atan2(distY, distX) #this is the angle of the robot off the x axis
-            alphaError = alpha - c_theta  #difference between the angle of the robot to the goal and the robots current orientation
-            alphaError = math.atan2(math.sin(alphaError), math.cos(alphaError))#this wraps the direction of the robot, so it always turns the shortest way
-
+            alpha = math.atan2(distY, distX)
+            alphaError = alpha - c_theta
+            alphaError = math.atan2(math.sin(alphaError), math.cos(alphaError))
 
             betaError = d_theta - alpha
-            betaError = math.atan2(math.sin(betaError), math.cos(betaError)) #this just does the wrapping similar to the a controller
+            betaError = math.atan2(math.sin(betaError), math.cos(betaError))
 
-            #define our gain
-            self.kp = 6
-            self.ka = 5
-            self.kb = -0.5
-            c_v = self.kp * distRho
+            # basic P gains
+            # --------------------------------------------------
+            # NEW SPEED LOGIC: cruise fast between waypoints,
+            # slow only near the final destination
+            # --------------------------------------------------
+
+            # Distance to *final* goal (not the next waypoint)
+            goal_dist = math.hypot(
+                self.robot.state_des.x[-1] - c_posX,
+                self.robot.state_des.y[-1] - c_posY
+            )
+
+            # If close to final goal, stop using lookahead (prevents weaving)
+            if goal_dist < 40:    # tune 25–50
+                d_posX = self.robot.state_des.x[-1]
+                d_posY = self.robot.state_des.y[-1]
+                d_theta = self.robot.state_des.theta[-1]
+
+
+            # Are we near the final goal?
+            if goal_dist < 60:        # slow-down radius (tune 40–80)
+                # Smooth deceleration only at the end
+                c_v = max(10.0, 0.5 * goal_dist)
+            else:
+                # Cruise at full speed between waypoints
+                c_v = 30.0
+
             c_w = self.ka * alphaError + self.kb * betaError
 
-            # define max speeds so our robot doesn't break
-            v_max = 16
-            w_max = 16
+            # --- linear/angular speed limits from project spec ---
+            v_max = 40.0
+            w_max = 16.0
 
             if c_v > v_max:
                 c_v = v_max
@@ -124,46 +289,47 @@ class controller:
             elif c_w < -w_max:
                 c_w = -w_max
 
+            # --------------------------------------------------
+            # *** Ackermann steering constraint ***
+            # limit curvature w/v so that |beta| <= beta_max
+            # --------------------------------------------------
+            if self.robot.state.vehicle == "v":
+                d = self.robot.state.d
+                beta_max = self.robot.state.beta_max
 
+                # --- Ackermann steering conversion ---
+                if abs(c_v) < 1e-3:
+                    beta = 0
+                else:
+                    beta = math.atan(c_w * d / c_v)
 
+                # enforce steering limits
+                if abs(beta) > beta_max:
+                    beta = math.copysign(beta_max, beta)
+                    # recompute allowed angular velocity
+                    c_w = math.tan(beta) * c_v / d
 
-
-            #now actually get the robot moving
+            # send command to robot
             self.robot.set_motor_control(c_v, c_w)
 
-            if distRho < 0.2:
-                self.robot.set_motor_control(0, 0)
-                print("Goal Reached!")
-                self.robot.set_motor_control(0, 0)
-                return True
-            else:
-                print('Continuing to point...')
-
-
+            # Waypoint reached?
+            # (tolerance in world coords – tune if needed)
+            if distRho < 10.0:
+                # print("Reached waypoint.")
+                if self.robot.state_des.reach_destination():
+                    print("Final goal reached.")
+                    self.robot.set_motor_control(0, 0)
+                    return True
+                else:
+                    # print("Advancing to next waypoint...")
+                    return False
 
         else:
-            print("no controller type is provided")
-            c_v = 0
-            c_w = 0
+            print("No valid controller type selected — stopping robot.")
+            self.robot.set_motor_control(0, 0)
 
-        # self.robot.set_motor_control(linear velocity (cm), angular velocity (rad))
-        self.robot.set_motor_control(c_v, c_w)  # use this command to set robot's speed in local frame
-
-        # you need to write code to find the wheel speed for your c_v, and c_w, the program won't calculate it for you.
-
-        self.robot.send_wheel_speed(phi_l=6.0, phi_r=6.0)  # unit rad/s
-
-        # use the following to log the variables, use [] to bracket all variables you want to store
-        # stored values are in log folder
-        if self.logging == True:
+        # Logging
+        if self.logging:
             self.robot.log_data([c_posX, c_posY, c_theta, c_vix, c_viy, c_wi, c_v, c_w])
 
-        if abs(c_posX - d_posX) < 5 and abs(c_theta - d_theta) < 0.2:  # you need to modify the reach way point criteria
-            if (self.robot.state_des.reach_destination()):
-                print("final goal reached")
-                self.robot.set_motor_control(.0, .0)  # stop the motor
-                return True
-            else:
-                print("one goal point reached, continute to next goal point")
-
-        return False  # just return False, don't remove it.
+        return False

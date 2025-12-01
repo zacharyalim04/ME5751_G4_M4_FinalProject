@@ -3,9 +3,8 @@ import numpy as np
 import math
 import random
 from PIL import Image, ImageTk
-
+from ackermann_path import curvature_of_fillet, interp_line
 from scipy.spatial import KDTree
-
 from Path import *
 # from Queue import Queue
 
@@ -51,12 +50,12 @@ class path_planner:
 
         self._init_path_img()
         self.path = Path()
-        
-        self.set_start(world_x = .0, world_y = .0)
-        self.set_goal(world_x = 100.0, world_y = 200.0, world_theta = .0)
 
-        self.plan_path()
-        self._show_path()
+        self.min_turn_radius = 40.0  # pixels; tune for your 4-wheel Ackermann vehicle
+        # Start and goal will be set later from the GUI callbacks
+        self.start_node = None
+        self.goal_node = None
+
 
     def set_start(self, world_x = 0, world_y = 0, world_theta = 0):
         self.start_state_map = Pose()
@@ -190,7 +189,145 @@ class path_planner:
 
         return new_path        
 
+    def _remove_short_segments(self, nodes, min_dist=20):
+        """
+        Removes consecutive nodes that are too close together.
+        nodes: list of prm_node in sequence
+        min_dist: minimum allowed distance in pixels
+        Returns: pruned list of nodes
+        """
+        if not nodes:
+            return nodes
+
+        new_nodes = [nodes[0]]
+        last = nodes[0]
+
+        for n in nodes[1:]:
+            dx = n.map_i - last.map_i
+            dy = n.map_j - last.map_j
+            dist = math.hypot(dx, dy)
+
+            if dist >= min_dist:
+                new_nodes.append(n)
+                last = n
+
+        return new_nodes
+
+    def _remove_sharp_angles(self, nodes, min_angle_deg=25):
+        """
+        Removes nodes that create extremely sharp turning angles.
+        Keeps start and goal.
+        """
+        if len(nodes) <= 2:
+            return nodes
+
+        new_nodes = [nodes[0]]
+        for i in range(1, len(nodes) - 1):
+            p_prev = nodes[i - 1]
+            p = nodes[i]
+            p_next = nodes[i + 1]
+
+            v1 = (p.map_i - p_prev.map_i, p.map_j - p_prev.map_j)
+            v2 = (p_next.map_i - p.map_i, p_next.map_j - p.map_j)
+
+            L1 = math.hypot(v1[0], v1[1])
+            L2 = math.hypot(v2[0], v2[1])
+            if L1 < 1e-6 or L2 < 1e-6:
+                continue
+
+            dot = (v1[0] * v2[0] + v1[1] * v2[1]) / (L1 * L2)
+            dot = max(-1.0, min(1.0, dot))
+            angle = math.degrees(math.acos(dot))
+
+            # If angle is too sharp → skip this node
+            if angle < min_angle_deg:
+                continue
+
+            new_nodes.append(p)
+
+        new_nodes.append(nodes[-1])
+        return new_nodes
+
+    def _remove_collinear(self, nodes, angle_tol_deg=10):
+        """
+        Removes nodes that lie nearly collinear between neighbors.
+        Useful to eliminate stair-step patterns along obstacle boundaries.
+        """
+        if len(nodes) <= 2:
+            return nodes
+
+        new_nodes = [nodes[0]]
+
+        for i in range(1, len(nodes) - 1):
+            p_prev = nodes[i - 1]
+            p = nodes[i]
+            p_next = nodes[i + 1]
+
+            v1 = (p.map_i - p_prev.map_i, p.map_j - p_prev.map_j)
+            v2 = (p_next.map_i - p.map_i, p_next.map_j - p.map_j)
+
+            L1 = math.hypot(v1[0], v1[1])
+            L2 = math.hypot(v2[0], v2[1])
+            if L1 < 1e-6 or L2 < 1e-6:
+                continue
+
+            dot = (v1[0] * v2[0] + v1[1] * v2[1]) / (L1 * L2)
+            dot = max(-1.0, min(1.0, dot))
+            angle = math.degrees(math.acos(dot))
+
+            # If angle is almost straight (collinear) → remove this node
+            if abs(angle) < angle_tol_deg:
+                continue
+
+            new_nodes.append(p)
+
+        new_nodes.append(nodes[-1])
+        return new_nodes
+
+
+    def _compute_thetas(self, pts):
+        """
+        pts: list of (map_i, map_j) points (pixel coords)
+        returns: list of (map_i, map_j, theta) with heading angles
+        """
+        out = []
+        n = len(pts)
+        for i in range(n):
+            if i < n - 1:
+                dx = pts[i+1][1] - pts[i][1]   # map_j is x
+                dy = pts[i+1][0] - pts[i][0]   # map_i is y
+            else:
+                dx = pts[i][1] - pts[i-1][1]
+                dy = pts[i][0] - pts[i-1][0]
+
+            theta = math.atan2(-dy, dx)
+            out.append((pts[i][0], pts[i][1], theta))
+
+        # Optional heading smoothing to remove discontinuities
+        for i in range(1, n-1):
+            prev_theta = out[i-1][2]
+            next_theta = out[i+1][2]
+
+            # Weighted average
+            smoothed = math.atan2(
+                math.sin(prev_theta) + math.sin(next_theta),
+                math.cos(prev_theta) + math.cos(next_theta)
+            )
+
+            out[i] = (out[i][0], out[i][1], smoothed)
+
+        return out
+        
+
     def plan_path(self):
+        # Set start from current robot pose
+        robot = self.graphics.environment.robots[0]
+        rx, ry, rtheta = robot.state.get_pos_state()
+        self.set_start(world_x=rx, world_y=ry, world_theta=rtheta)
+
+        if self.goal_node is None:
+            print("No goal set yet; right-click to choose a goal first.")
+            return
         # Retry until a valid path is found
         max_attempts = 50
         attempt = 0
@@ -198,6 +335,12 @@ class path_planner:
         while attempt < max_attempts:
             attempt += 1
             print(f"Planning attempt {attempt}")
+
+            # Reset the PRM tree for this attempt
+            self.pTree = prm_tree()
+            self.pTree.add_nodes(self.start_node)
+            self.pTree.add_nodes(self.goal_node)
+
 
             ## Define other variables needed for path planning
             num_samples = 300 # Number of Random Nodes to create
@@ -336,34 +479,88 @@ class path_planner:
                 self.pTree.add_nodes(self.goal_node)
                 continue
 
-            ## Draw pixel path using Node Roadmap
-            ## FIRST: check if any node along the path has clear line-of-sight to goal
-            shortcut_index = None
-            for i, n in enumerate(path_nodes):
-                if self._line_is_free(n, self.goal_node):
-                    shortcut_index = i
-                    break
+            # Remove very short PRM segments to prevent tiny turns
+            path_nodes = self._remove_short_segments(path_nodes, min_dist=20)
 
-            if shortcut_index is not None:
-                direct_node = path_nodes[shortcut_index]
+            path_nodes = self._remove_sharp_angles(path_nodes, min_angle_deg=25)
 
-                ## draw path from start → node with shortcut
-                for a, b in zip(path_nodes[:shortcut_index], path_nodes[1:shortcut_index+1]):
-                    for pi, pj in bresenham(a.map_i, a.map_j, b.map_i, b.map_j):
-                        self.path.add_pose(Pose(map_i=pi, map_j=pj, theta=0))
+            path_nodes = self._remove_collinear(path_nodes, angle_tol_deg=10)
 
-                ## now draw direct line from that node → goal
-                for pi, pj in bresenham(direct_node.map_i, direct_node.map_j,
-                                        self.goal_node.map_i, self.goal_node.map_j):
-                    self.path.add_pose(Pose(map_i=pi, map_j=pj, theta=0))
+            ## Draw pixel path using Node Roadmap (with Ackermann-compliant fillets)
+            raw_points = [(n.map_i, n.map_j) for n in path_nodes]
 
-            else:
-                ## No shortcut, draw full PRM path as usual
-                for a, b in zip(path_nodes[:-1], path_nodes[1:]):
-                    for pi, pj in bresenham(a.map_i, a.map_j, b.map_i, b.map_j):
-                        self.path.add_pose(Pose(map_i=pi, map_j=pj, theta=0))
+            def is_free(i, j):
+                if i < 0 or i >= self.map_width or j < 0 or j >= self.map_height:
+                    return False
+                return self.costmap.costmap[i][j] < 255
 
-            self.path.save_path(file_name="Log\\prm_path.csv")
+            # Generate smoothed path with circular fillets at corners
+            # --- Ackermann Fillet Path Generation ---
+            smooth_points = []
+            prev = raw_points[0]
+            smooth_points.append(prev)
+
+            for i in range(1, len(raw_points)-1):
+                p_prev = raw_points[i-1]
+                p = raw_points[i]
+                p_next = raw_points[i+1]
+
+                fillet = curvature_of_fillet(p_prev, p, p_next, R_min=self.min_turn_radius)
+
+                if fillet is None:
+                    # straight segment only
+                    smooth_points.extend(interp_line(prev, p, step=0.5))
+                    prev = p
+                    continue
+
+                t1, t2, c, R, th1, th2 = fillet
+
+                # straight into fillet
+                smooth_points.extend(interp_line(prev, t1, step=0.5))
+
+                # arc
+                arc_len = abs(th2 - th1) * R
+                N = max(int(arc_len / 0.5), 1)
+                for k in range(N + 1):
+                    th = th1 + (th2 - th1) * k / N
+                    x = c[0] + R * math.cos(th)
+                    y = c[1] + R * math.sin(th)
+                    smooth_points.append((x, y))
+
+                prev = t2
+
+            # ⬇⬇⬇ ADD THIS AFTER THE LOOP ⬇⬇⬇
+            # final segment to last waypoint
+            smooth_points.extend(interp_line(prev, raw_points[-1], step=0.5))
+
+
+            # Compute heading angles for the smoothed path
+            pts_with_theta = self._compute_thetas(smooth_points)
+
+            # Write smoothed path with proper orientation
+            for pi, pj, th in pts_with_theta:
+                self.path.add_pose(
+                    Pose(map_i=int(round(pi)), map_j=int(round(pj)), theta=th)
+                )
+
+
+            # Save a thinned version of the path for the controller
+            out_path = "Log/prm_path.csv"
+            with open(out_path, "w") as f:
+                # header
+                f.write("map_i\tmap_j\ttheta\n")
+
+                # keep only every Nth point so we don't overload the controller/GUI
+                N = 30  # TUNE THIS NTH VALUE FOR LESS WAYPOINTS
+
+                for k, (pi, pj, th) in enumerate(pts_with_theta):
+                    # Keep every Nth point and always keep the last one
+                    if (k % N != 0) and (k != len(pts_with_theta) - 1):
+                        continue
+
+                    mi = int(round(pi))
+                    mj = int(round(pj))
+                    f.write(f"{mi}\t{mj}\t{th}\n")              
 
             # If we reach here, we successfully built a path → exit retry loop
             break
