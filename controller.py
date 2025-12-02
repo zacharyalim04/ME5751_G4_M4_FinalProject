@@ -15,7 +15,7 @@ class controller:
         self.robot = robot  # do not delete this line
         self.kp = 6   # k_rho
         self.ka = 3   # k_alpha
-        self.kb = -0.3  # k_beta
+        self.kb = -0.2  # k_beta
         self.logging = logging
 
         if logging:
@@ -62,6 +62,28 @@ class controller:
                 world_x, world_y = self.graphics.path.map2world(map_i, map_j)
 
                 self.robot.state_des.add_destination(x=world_x, y=world_y, theta=theta)
+
+        # -----------------------------
+        # Align robot to first PRM edge
+        # -----------------------------
+        if len(self.robot.state_des.x) >= 2:
+
+            x0 = self.robot.state_des.x[0]
+            y0 = self.robot.state_des.y[0]
+            x1 = self.robot.state_des.x[1]
+            y1 = self.robot.state_des.y[1]
+
+            # heading angle robot should face at start
+            desired_theta0 = math.atan2(y1 - y0, x1 - x0)
+
+            # overwrite robot's current orientation
+            self.robot.state.theta = desired_theta0
+
+            # ALSO update pose so GUI and simulation are aligned
+            self.robot.state.set_pos_state(x=x0, y=y0, theta=desired_theta0)
+
+            print(f"Robot initial theta set to {desired_theta0:.3f} rad")
+
 
         print("PRM path loaded successfully.")
 
@@ -242,29 +264,29 @@ class controller:
             )
 
             # If close to final goal, stop using lookahead (prevents weaving)
-            if goal_dist < 40:    # tune 25–50
+            if goal_dist < 35:    # tune 25–50
                 d_posX = self.robot.state_des.x[-1]
                 d_posY = self.robot.state_des.y[-1]
                 d_theta = self.robot.state_des.theta[-1]
 
 
             # Are we near the final goal?
-            if goal_dist < 60:        # slow-down radius (tune 40–80)
+            if goal_dist < 15:        # slow-down radius (tune 40–80)
                 # Smooth deceleration only at the end
-                c_v = max(10.0, 0.5 * goal_dist)
+                c_v = max(6.0, 0.4 * goal_dist)
             else:
                 # Cruise at full speed between waypoints
-                c_v = 30.0
+                c_v = 45.0
 
             c_w = self.ka * alphaError + self.kb * betaError
 
             # --- STOP USING alphaError WHEN NEAR GOAL ---
-            if goal_dist < 15:   # tune 10–20
+            if goal_dist < 20:   # tune 10–20
                 c_w = self.kb * betaError   # only fix heading, no lateral steering
 
 
             # --- linear/angular speed limits from project spec ---
-            v_max = 40.0
+            v_max = 48.0
             w_max = 16.0
 
             if c_v > v_max:
@@ -345,7 +367,7 @@ class controller:
 
             # Waypoint reached?
             # (tolerance in world coords – tune if needed)
-            if distRho < 10.0:
+            if distRho < 15.0:
                 # print("Reached waypoint.")
                 if self.robot.state_des.reach_destination():
                     print("Final goal reached.")

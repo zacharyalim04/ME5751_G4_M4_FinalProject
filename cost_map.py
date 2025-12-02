@@ -9,7 +9,7 @@ class cost_map:
     def __init__(self, graphics):
         self.graphics = graphics
 
-        self.inflation_radius = 18  # radius of our robot is 18 pixel or cm
+        self.inflation_radius = 30  # radius of our robot is 18 pixel or cm
         self.graphics.environment.robots[0].set_bot_size(body_cm=2 * 18)
 
         self.map_width = int(self.graphics.environment.width * self.graphics.scale)

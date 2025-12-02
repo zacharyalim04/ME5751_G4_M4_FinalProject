@@ -46,12 +46,14 @@ class path_planner:
         self.map_width = self.costmap.map_width
         self.map_height = self.costmap.map_height
 
+        self.safety_margin = 15   # pixels away from obstacles (TUNE THIS)
+
         self.pTree=prm_tree()
 
         self._init_path_img()
         self.path = Path()
 
-        self.min_turn_radius = 60.0  # pixels; tune for your 4-wheel Ackermann vehicle
+        self.min_turn_radius = 40.0  # pixels; tune for your 4-wheel Ackermann vehicle
         # Start and goal will be set later from the GUI callbacks
         self.set_start(world_x = 0, world_y = 0)
 
@@ -140,9 +142,16 @@ class path_planner:
     def _line_is_free(self, n1, n2):
         points = bresenham(n1.map_i, n1.map_j, n2.map_i, n2.map_j)
         for (i, j) in points:
+            # collision check
             if self.costmap.costmap[i][j] >= 255:
                 return False
+            
+            # safety distance check
+            if self.costmap.distmap[i][j] < self.safety_margin:
+                return False
+
         return True
+
 
     ## Breadth-First Search from Start to Goal
     def _bfs_search(self, start, goal):
@@ -391,7 +400,7 @@ class path_planner:
                 nodes_generated += 1 
 
             # Boundary Sampling for narrow corridors
-            boundary_samples = 400  # TUNE THE BOUNDARY SAMPLES
+            boundary_samples = 800  # TUNE THE BOUNDARY SAMPLES
             for _ in range(boundary_samples):
 
                 # pick a random pixel
@@ -562,26 +571,23 @@ class path_planner:
             # Save a thinned version of the path for the controller
             out_path = "Log/prm_path.csv"
             with open(out_path, "w") as f:
-                # header
                 f.write("map_i\tmap_j\ttheta\n")
 
-                # keep only every Nth point so we don't overload the controller/GUI
-                N = 30  # TUNE THIS NTH VALUE FOR LESS WAYPOINTS
+                # Thin the smoothed path by sampling every Nth point
+                N = 20   # adjust to taste
 
-                for k in range(N + 1):
-                    th = th1 + (th2 - th1) * k / N
-                    x = c[0] + R * math.cos(th)
-                    y = c[1] + R * math.sin(th)
+                for idx in range(0, len(pts_with_theta), N):
+                    mi = int(round(pts_with_theta[idx][0]))
+                    mj = int(round(pts_with_theta[idx][1]))
+                    th = pts_with_theta[idx][2]
+                    f.write(f"{mi}\t{mj}\t{th}\n")
 
-                    # NEW SAFETY CHECK: Ensure fillet arc stays away from obstacles
-                    mi = int(round(y))   # map_i (rows)
-                    mj = int(round(x))   # map_j (cols)
+                # Always write the final point
+                mi = int(round(pts_with_theta[-1][0]))
+                mj = int(round(pts_with_theta[-1][1]))
+                th = pts_with_theta[-1][2]
+                f.write(f"{mi}\t{mj}\t{th}\n")
 
-                    # if too close to wall, stop this arc early
-                    if self.costmap.distmap[mi][mj] <= self.min_turn_radius:
-                        break
-
-                    smooth_points.append((x, y))
 
             # If we reach here, we successfully built a path → exit retry loop
             break
