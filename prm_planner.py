@@ -53,9 +53,21 @@ class path_planner:
 
         self.min_turn_radius = 40.0  # pixels; tune for your 4-wheel Ackermann vehicle
         # Start and goal will be set later from the GUI callbacks
-        self.start_node = None
-        self.goal_node = None
+        self.set_start(world_x = 0, world_y = 0)
 
+        ### --- MODIFY DURING CLASS TEST --- ###
+        # Easy Map - Goal Point 1
+        # self.set_goal(world_x=190, world_y=-190)
+        # Easy Map - Goal Point 2
+        # self.set_goal(world_x=0, world_y=150)
+        # Medium Map - Goal Point 1
+        # self.set_goal(world_x=165, world_y=-165)
+        # Medium Map - Goal Point 2
+        self.set_goal(world_x=-70, world_y=200)
+        ### --- MODIFY DURING CLASS TEST --- ###
+
+        self.plan_path()
+        self._show_path()
 
     def set_start(self, world_x = 0, world_y = 0, world_theta = 0):
         self.start_state_map = Pose()
@@ -155,7 +167,7 @@ class path_planner:
                     visited.add(nxt)
                     parent[nxt] = curr
                     queue.append(nxt)
-        print(f"Nodes Searched: {nodes_searched}")
+        # print(f"Nodes Searched: {nodes_searched}")
 
         if goal not in parent:
             return None
@@ -329,12 +341,12 @@ class path_planner:
             print("No goal set yet; right-click to choose a goal first.")
             return
         # Retry until a valid path is found
-        max_attempts = 50
+        max_attempts = 100
         attempt = 0
 
         while attempt < max_attempts:
             attempt += 1
-            print(f"Planning attempt {attempt}")
+            # print(f"Planning attempt {attempt}")
 
             # Reset the PRM tree for this attempt
             self.pTree = prm_tree()
@@ -427,7 +439,7 @@ class path_planner:
                 nodes.append(prm_node(mi, mj))
                 nodes_generated += 1
 
-            print(f"Nodes Generated: {nodes_generated}")
+            # print(f"Nodes Generated: {nodes_generated}")
 
             ## KD-Tree Implementation
             node_points = [(n.map_i, n.map_j) for n in nodes]
@@ -461,7 +473,7 @@ class path_planner:
 
             # If BFS failed → retry
             if not path_nodes:
-                print("No path found, retrying...")
+                # print("No path found, retrying...")
                 # Reset roadmap before next attempt
                 self.pTree = prm_tree()
                 self.pTree.add_nodes(self.start_node)
@@ -473,7 +485,7 @@ class path_planner:
 
             # If shortcut empties path (rare), retry
             if not path_nodes:
-                print("Shortcut collapsed path, retrying...")
+                # print("Shortcut collapsed path, retrying...")
                 self.pTree = prm_tree()
                 self.pTree.add_nodes(self.start_node)
                 self.pTree.add_nodes(self.goal_node)

@@ -22,7 +22,7 @@ class E160_state:
 			self.trans = np.array([[0.5*self.r,0.5*self.r],[0.5*self.r/self.L,-0.5*self.r/self.L]])
 			self.trans_inv = np.linalg.inv(self.trans)
 		elif self.vehicle == "v":
-			self.phi_max = 20.0 #max velocity of the wheels
+			self.phi_max = 16.0 #max velocity of the wheels
 			self.Rt_max = 32.0 #max radius of curvature
 			self.d = 20.0 #dimension of the robot
 			self.beta_max = math.asin(self.d/self.Rt_max) # max steering angle

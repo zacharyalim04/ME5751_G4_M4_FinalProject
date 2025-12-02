@@ -22,7 +22,7 @@ class controller:
             self.robot.make_headers(['pos_X', 'posY', 'posZ', 'vix', 'viy', 'wi', 'vr', 'wr'])
 
         # select the controller type
-        self.controller_type = 'a'
+        self.controller_type = 'p'
 
     def attach_graphics(self, graphics):
         self.graphics = graphics   
@@ -207,23 +207,6 @@ class controller:
                 blend = max(0.0, 1.0 - goal_dist / 80.0)   # fades in smoothly
                 c_w = (1 - blend) * c_w + blend * w_goal
 
-
-            # -------------------------------
-            # ACKERMANN STEERING LIMITS
-            # -------------------------------
-            if self.robot.state.vehicle == "v":
-                d = self.robot.state.d
-                beta_max = self.robot.state.beta_max
-
-                if abs(c_v) < 1e-3:
-                    beta = 0
-                else:
-                    beta = math.atan(c_w * d / c_v)
-
-                if abs(beta) > beta_max:
-                    beta = math.copysign(beta_max, beta)
-                    c_w = math.tan(beta) * c_v / d
-
             # send the valid control
             self.robot.set_motor_control(c_v, c_w)
 
@@ -275,6 +258,11 @@ class controller:
 
             c_w = self.ka * alphaError + self.kb * betaError
 
+            # --- STOP USING alphaError WHEN NEAR GOAL ---
+            if goal_dist < 15:   # tune 10–20
+                c_w = self.kb * betaError   # only fix heading, no lateral steering
+
+
             # --- linear/angular speed limits from project spec ---
             v_max = 40.0
             w_max = 16.0
@@ -293,24 +281,67 @@ class controller:
             # *** Ackermann steering constraint ***
             # limit curvature w/v so that |beta| <= beta_max
             # --------------------------------------------------
+            # --------------------------------------------------
+            # Ackermann curvature limit BEFORE sending command
+            # --------------------------------------------------
             if self.robot.state.vehicle == "v":
                 d = self.robot.state.d
                 beta_max = self.robot.state.beta_max
 
-                # --- Ackermann steering conversion ---
-                if abs(c_v) < 1e-3:
-                    beta = 0
-                else:
-                    beta = math.atan(c_w * d / c_v)
+                # Maximum physically allowable curvature:
+                # k_max = tan(beta_max) / d
+                k_max = math.tan(beta_max) / d
 
-                # enforce steering limits
-                if abs(beta) > beta_max:
-                    beta = math.copysign(beta_max, beta)
-                    # recompute allowed angular velocity
-                    c_w = math.tan(beta) * c_v / d
+                # If curvature |w/v| exceeds max curvature → scale w down
+                if abs(c_v) > 1e-6:             # normal case
+                    k = abs(c_w / c_v)
+                    if k > k_max:
+                        c_w = math.copysign(k_max * abs(c_v), c_w)
 
-            # send command to robot
+                else:   # v ≈ 0 — limit turning-in-place
+                    c_w = 0.0
+
+            # --------------------------------------------------
+            # *** Wheel-speed limiting (16 rad/s per wheel) ***
+            # Applies kinematics-aware scaling of (v, w)
+            # --------------------------------------------------
+            phi_max = self.robot.state.phi_max
+            r_wheel = self.robot.state.r
+            L_body  = self.robot.state.L
+
+            if self.robot.state.vehicle == "d":
+                # Differential drive kinematics:
+                # v = (r/2) * (phi_r + phi_l)
+                # w = (r/(2L)) * (phi_r - phi_l)
+                # Solve for wheel speeds:
+                phi_r = (c_v / r_wheel) + (L_body * c_w / r_wheel)
+                phi_l = (c_v / r_wheel) - (L_body * c_w / r_wheel)
+
+                max_phi = max(abs(phi_r), abs(phi_l))
+                if max_phi > phi_max:
+                    scale = phi_max / max_phi
+                    phi_r *= scale
+                    phi_l *= scale
+
+                    # Map back to admissible (v, w) consistent with wheel speeds
+                    c_v = 0.5 * r_wheel * (phi_r + phi_l)
+                    c_w = (r_wheel / (2.0 * L_body)) * (phi_r - phi_l)
+
+                # (Optional) if you want to visualize wheel speeds directly:
+                # self.robot.send_wheel_speed(phi_l, phi_r)
+
+            elif self.robot.state.vehicle == "v":
+                # For Ackermann, approximate wheel speed as |v| / r
+                # and enforce |v| <= phi_max * r_wheel
+                v_limit = phi_max * r_wheel
+                if abs(c_v) > v_limit:
+                    scale = v_limit / abs(c_v)
+                    c_v *= scale
+                    c_w *= scale   # preserve curvature w/v
+
+            # Finally send the (v, w) command to the robot
             self.robot.set_motor_control(c_v, c_w)
+
 
             # Waypoint reached?
             # (tolerance in world coords – tune if needed)
