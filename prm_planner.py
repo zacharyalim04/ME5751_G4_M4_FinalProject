@@ -51,7 +51,7 @@ class path_planner:
         self._init_path_img()
         self.path = Path()
 
-        self.min_turn_radius = 40.0  # pixels; tune for your 4-wheel Ackermann vehicle
+        self.min_turn_radius = 60.0  # pixels; tune for your 4-wheel Ackermann vehicle
         # Start and goal will be set later from the GUI callbacks
         self.set_start(world_x = 0, world_y = 0)
 
@@ -367,7 +367,7 @@ class path_planner:
             for _ in range(num_samples):
                 if random.random() < 0.7:
                     # Sample in a shrinking radius around goal
-                    radius = 10   # TUNE THIS RADIUS!!!
+                    radius = 50   # TUNE THIS RADIUS!!!
                     gi, gj = self.goal_node.map_i, self.goal_node.map_j
 
                     ri = int(gi + random.randint(-radius, radius))
@@ -467,6 +467,9 @@ class path_planner:
                     nb = nodes[ni]
                     if self._line_is_free(node, nb):
                         self.pTree.add_edges(node, nb)
+
+            # After building full roadmap, draw it
+            self.debug_draw_prm()
             
             ## Breadth-First Search through generated Roadmap
             path_nodes = self._bfs_search(self.start_node, self.goal_node)
@@ -565,20 +568,53 @@ class path_planner:
                 # keep only every Nth point so we don't overload the controller/GUI
                 N = 30  # TUNE THIS NTH VALUE FOR LESS WAYPOINTS
 
-                for k, (pi, pj, th) in enumerate(pts_with_theta):
-                    # Keep every Nth point and always keep the last one
-                    if (k % N != 0) and (k != len(pts_with_theta) - 1):
-                        continue
+                for k in range(N + 1):
+                    th = th1 + (th2 - th1) * k / N
+                    x = c[0] + R * math.cos(th)
+                    y = c[1] + R * math.sin(th)
 
-                    mi = int(round(pi))
-                    mj = int(round(pj))
-                    f.write(f"{mi}\t{mj}\t{th}\n")              
+                    # NEW SAFETY CHECK: Ensure fillet arc stays away from obstacles
+                    mi = int(round(y))   # map_i (rows)
+                    mj = int(round(x))   # map_j (cols)
+
+                    # if too close to wall, stop this arc early
+                    if self.costmap.distmap[mi][mj] <= self.min_turn_radius:
+                        break
+
+                    smooth_points.append((x, y))
 
             # If we reach here, we successfully built a path → exit retry loop
             break
 
         else:
             print("Failed to find a path after maximum attempts.")
+    
+    def debug_draw_prm(self):
+        """
+        Draw ALL PRM nodes and ALL edges on the canvas for visualization.
+        """
+        canvas = self.graphics.canvas
+
+        # Draw nodes (small blue dots)
+        for node in self.pTree.nodes:
+            x = node.map_j
+            y = node.map_i
+            canvas.create_oval(
+                x-2, y-2, x+2, y+2,
+                fill="blue", outline=""
+            )
+
+        # Draw edges (light gray lines)
+        for edge in self.pTree.edges:
+            x1 = edge.node1.map_j
+            y1 = edge.node1.map_i
+            x2 = edge.node2.map_j
+            y2 = edge.node2.map_i
+
+            canvas.create_line(
+                x1, y1, x2, y2,
+                fill="#cccccc", width=1
+            )
 
 
 # bresenham algorithm for line generation on grid map
