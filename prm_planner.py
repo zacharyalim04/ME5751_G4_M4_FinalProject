@@ -63,9 +63,9 @@ class path_planner:
         # Easy Map - Goal Point 2
         # self.set_goal(world_x=0, world_y=150)
         # Medium Map - Goal Point 1
-        # self.set_goal(world_x=165, world_y=-165)
+        self.set_goal(world_x=165, world_y=-165)
         # Medium Map - Goal Point 2
-        self.set_goal(world_x=-70, world_y=200)
+        # self.set_goal(world_x=-70, world_y=200)
         ### --- MODIFY DURING CLASS TEST --- ###
 
         self.plan_path()
