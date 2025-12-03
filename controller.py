@@ -14,8 +14,8 @@ class controller:
 
         self.robot = robot  # do not delete this line
         self.kp = 6   # k_rho
-        self.ka = 3   # k_alpha
-        self.kb = -0.2  # k_beta
+        self.ka = 1.6   # k_alpha
+        self.kb = -0.10  # k_beta
         self.logging = logging
 
         if logging:
@@ -125,7 +125,7 @@ class controller:
         # LOOKAHEAD-SELECTION: Pure Pursuit style tracking
         # --------------------------------------------------
 
-        lookahead_dist = 30.0   # tune 60–120 px
+        lookahead_dist = 20.0   # tune 60–120 px
 
         # Find index of the closest waypoint to the robot
         closest_idx = 0
@@ -271,9 +271,9 @@ class controller:
 
 
             # Are we near the final goal?
-            if goal_dist < 15:        # slow-down radius (tune 40–80)
+            if goal_dist < 10:        # slow-down radius (tune 40–80)
                 # Smooth deceleration only at the end
-                c_v = max(6.0, 0.4 * goal_dist)
+                c_v = max(10.0, 0.5 * goal_dist)
             else:
                 # Cruise at full speed between waypoints
                 c_v = 45.0
@@ -281,7 +281,7 @@ class controller:
             c_w = self.ka * alphaError + self.kb * betaError
 
             # --- STOP USING alphaError WHEN NEAR GOAL ---
-            if goal_dist < 20:   # tune 10–20
+            if goal_dist < 15:   # tune 10–20
                 c_w = self.kb * betaError   # only fix heading, no lateral steering
 
 
@@ -367,7 +367,7 @@ class controller:
 
             # Waypoint reached?
             # (tolerance in world coords – tune if needed)
-            if distRho < 15.0:
+            if distRho < 20.0:
                 # print("Reached waypoint.")
                 if self.robot.state_des.reach_destination():
                     print("Final goal reached.")
