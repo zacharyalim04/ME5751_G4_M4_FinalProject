@@ -28,6 +28,7 @@ class E160_state:
 			self.beta_max = math.asin(self.d/self.Rt_max) # max steering angle
 			self.L = 8.0
 			self.r = 3.0
+			self.track_width = 0.20   # meters — adjust to your robot scale
 
 
 		self.wrong_speed = False

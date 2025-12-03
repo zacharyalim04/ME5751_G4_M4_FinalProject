@@ -361,6 +361,51 @@ class controller:
                     c_v *= scale
                     c_w *= scale   # preserve curvature w/v
 
+            # --------------------------------------------------
+            # Ackermann WHEEL-SPEED COMPUTATION (true geometry)
+            # Converts (v, w) → inside/outside wheel speeds
+            # --------------------------------------------------
+            if self.robot.state.vehicle == "v":
+
+                # geometric parameters of the robot
+                L = self.robot.state.L           # wheelbase
+                r = self.robot.state.r           # wheel radius
+                T = getattr(self.robot.state, "track_width", 0.20)  # <-- add track_width to E160_state (meters)
+
+                # avoid division by zero
+                if abs(c_w) < 1e-6:
+                    # going straight → both wheels same speed
+                    phi_l = c_v / r
+                    phi_r = c_v / r
+                else:
+                    # curvature k = w/v, turning radius R = v/w
+                    R_car = c_v / c_w
+
+                    # Ackermann inner and outer wheel radii
+                    R_left  = R_car - T/2
+                    R_right = R_car + T/2
+
+                    # wheel angular speeds
+                    phi_l = R_left  * c_w / r
+                    phi_r = R_right * c_w / r
+
+                # enforce wheel speed limit
+                phi_max = self.robot.state.phi_max
+                max_phi = max(abs(phi_l), abs(phi_r))
+
+                if max_phi > phi_max:
+                    scale = phi_max / max_phi
+                    phi_l *= scale
+                    phi_r *= scale
+
+                # map back to robot linear/angular velocity (consistent with limited wheels)
+                v_new = r * (phi_r + phi_l) / 2
+                w_new = r * (phi_r - phi_l) / (T)
+
+                c_v = v_new
+                c_w = w_new
+
+
             # Finally send the (v, w) command to the robot
             self.robot.set_motor_control(c_v, c_w)
 
