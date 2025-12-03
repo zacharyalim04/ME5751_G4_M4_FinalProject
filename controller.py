@@ -82,7 +82,7 @@ class controller:
             # ALSO update pose so GUI and simulation are aligned
             self.robot.state.set_pos_state(x=x0, y=y0, theta=desired_theta0)
 
-            print(f"Robot initial theta set to {desired_theta0:.3f} rad")
+            # print(f"Robot initial theta set to {desired_theta0:.3f} rad")
 
 
         print("PRM path loaded successfully.")

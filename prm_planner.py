@@ -125,11 +125,31 @@ class path_planner:
             self.map_img_np[map_i][map_j][2] =0
             self.map_img_np[map_i][map_j][3] =255
 
+            # ### ADDED — DRAW X MARKS ON EACH PATH POSE ###
+            # canvas = self.graphics.canvas
+            # for pose in self.path.poses:
+            #     x = pose.map_j
+            #     y = pose.map_i
+            #     size = 4  # size of X arms
+            #     canvas.create_line(x-size, y-size, x+size, y+size, fill="red", width=2)
+            #     canvas.create_line(x-size, y+size, x+size, y-size, fill="red", width=2)
+            # ### END ADDITION ###
+
         np.savetxt("file.txt", self.map_img_np[1])
 
         self.path_img=Image.frombytes('RGBA', (self.map_img_np.shape[1],self.map_img_np.shape[0]), self.map_img_np.astype('b').tostring())
         # self.path_img = toimage(self.map_img_np)
         #self.path_img.show()
+        if hasattr(self, "final_prm_nodes"):
+            canvas = self.graphics.canvas
+            size = 6  # X size (adjust if needed)
+
+            for node in self.final_prm_nodes:
+                x = node.map_j
+                y = node.map_i
+
+                canvas.create_line(x-size, y-size, x+size, y+size, fill="red", width=2)
+                canvas.create_line(x-size, y+size, x+size, y-size, fill="red", width=2)
         self.graphics.draw_path(self.path_img)
 
     def check_vicinity(self,x1,y1,x2,y2,threshold = 1.0): #can MODIFY THIS CODE HERE AND CHANGE HOWEVER,
@@ -341,6 +361,9 @@ class path_planner:
         
 
     def plan_path(self):
+        import time
+        t_start = time.time()
+
         # Set start from current robot pose
         robot = self.graphics.environment.robots[0]
         rx, ry, rtheta = robot.state.get_pos_state()
@@ -509,6 +532,7 @@ class path_planner:
             path_nodes = self._remove_sharp_angles(path_nodes, min_angle_deg=25)
 
             path_nodes = self._remove_collinear(path_nodes, angle_tol_deg=10)
+            self.final_prm_nodes = path_nodes
 
             ## Draw pixel path using Node Roadmap (with Ackermann-compliant fillets)
             raw_points = [(n.map_i, n.map_j) for n in path_nodes]
@@ -574,7 +598,7 @@ class path_planner:
                 f.write("map_i\tmap_j\ttheta\n")
 
                 # Thin the smoothed path by sampling every Nth point
-                N = 20   # adjust to taste
+                N = 80   # adjust to taste
 
                 for idx in range(0, len(pts_with_theta), N):
                     mi = int(round(pts_with_theta[idx][0]))
@@ -588,6 +612,20 @@ class path_planner:
                 th = pts_with_theta[-1][2]
                 f.write(f"{mi}\t{mj}\t{th}\n")
 
+            ### ADDED — COMPUTE AND PRINT PATH LENGTH ###
+            total_length = 0.0
+            for i in range(len(pts_with_theta) - 1):
+                pi = pts_with_theta[i]
+                pj = pts_with_theta[i+1]
+                di = pi[0] - pj[0]
+                dj = pi[1] - pj[1]
+                total_length += math.hypot(di, dj)
+
+            print(f"[PRM] Final smoothed path length: {total_length:.2f} pixels")
+            ### END ADDITION ###
+
+            t_end = time.time()
+            print(f"[PRM] Path generated in {t_end - t_start:.3f} seconds")
 
             # If we reach here, we successfully built a path → exit retry loop
             break
