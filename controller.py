@@ -286,7 +286,7 @@ class controller:
 
 
             # --- linear/angular speed limits from project spec ---
-            v_max = 48.0
+            v_max = 60.0
             w_max = 16.0
 
             if c_v > v_max:
@@ -324,7 +324,7 @@ class controller:
                     c_w = 0.0
 
             # --------------------------------------------------
-            # *** Wheel-speed limiting (16 rad/s per wheel) ***
+            # *** Wheel-speed limiting (20 rad/s per wheel) ***
             # Applies kinematics-aware scaling of (v, w)
             # --------------------------------------------------
             phi_max = self.robot.state.phi_max
