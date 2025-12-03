@@ -361,35 +361,33 @@ class controller:
                     c_v *= scale
                     c_w *= scale   # preserve curvature w/v
 
-            # --------------------------------------------------
-            # Ackermann WHEEL-SPEED COMPUTATION (true geometry)
+            # Ackermann Wheel Speeds
             # Converts (v, w) → inside/outside wheel speeds
-            # --------------------------------------------------
             if self.robot.state.vehicle == "v":
 
-                # geometric parameters of the robot
+                # Geometric parameters of the robot
                 L = self.robot.state.L           # wheelbase
                 r = self.robot.state.r           # wheel radius
-                T = getattr(self.robot.state, "track_width", 0.20)  # <-- add track_width to E160_state (meters)
+                T = getattr(self.robot.state, "track_width", 0.20)
 
-                # avoid division by zero
+                # Avoid division by zero
                 if abs(c_w) < 1e-6:
-                    # going straight → both wheels same speed
+                    # Going straight → both wheels same speed
                     phi_l = c_v / r
                     phi_r = c_v / r
                 else:
-                    # curvature k = w/v, turning radius R = v/w
+                    # Curvature k = w/v, turning radius R = v/w
                     R_car = c_v / c_w
 
                     # Ackermann inner and outer wheel radii
                     R_left  = R_car - T/2
                     R_right = R_car + T/2
 
-                    # wheel angular speeds
+                    # Wheel angular speeds
                     phi_l = R_left  * c_w / r
                     phi_r = R_right * c_w / r
 
-                # enforce wheel speed limit
+                # Enforce wheel speed limit
                 phi_max = self.robot.state.phi_max
                 max_phi = max(abs(phi_l), abs(phi_r))
 
@@ -398,7 +396,7 @@ class controller:
                     phi_l *= scale
                     phi_r *= scale
 
-                # map back to robot linear/angular velocity (consistent with limited wheels)
+                # Map back to robot linear/angular velocity (consistent with limited wheels)
                 v_new = r * (phi_r + phi_l) / 2
                 w_new = r * (phi_r - phi_l) / (T)
 
