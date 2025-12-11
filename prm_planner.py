@@ -59,13 +59,21 @@ class path_planner:
 
         ### --- MODIFY DURING CLASS TEST --- ###
         # Easy Map - Goal Point 1
-        # self.set_goal(world_x=190, world_y=-190)
+        # self.set_goal(world_x=190, world_y=-110)
         # Easy Map - Goal Point 2
-        # self.set_goal(world_x=0, world_y=150)
+        # self.set_goal(world_x=-190, world_y=150)
+
         # Medium Map - Goal Point 1
-        self.set_goal(world_x=165, world_y=-165)
+        # self.set_goal(world_x=200, world_y=-200)
         # Medium Map - Goal Point 2
-        # self.set_goal(world_x=-70, world_y=200)
+        # self.set_goal(world_x=-185, world_y=185)
+
+        # Final Map - Goal Point 1
+        # self.set_goal(world_x=-124,world_y=-89)
+        # Final Map - Goal Point 2
+        self.set_goal(world_x=199,world_y=-180)
+        # Final Map - Goal Point 3
+        # self.set_goal(world_x=-210,world_y=-222)
         ### --- MODIFY DURING CLASS TEST --- ###
 
         self.plan_path()
@@ -87,13 +95,13 @@ class path_planner:
         self.goal_node = prm_node(goal_i,goal_j)
         self.pTree.add_nodes(self.goal_node)
 
-    #convert a point a map to the actual world position
+    # Convert a point in a map to the actual world position
     def map2world(self,map_i,map_j):
         world_x = -self.graphics.environment.width/2*self.graphics.scale + map_j
         world_y = self.graphics.environment.height/2*self.graphics.scale - map_i
         return world_x, world_y
 
-    #convert a point in world coordinate to map pixel
+    # Convert a point in world coordinate to map pixel
     def world2map(self,world_x,world_y):
         map_i = int(self.graphics.environment.width/2*self.graphics.scale - world_y)
         map_j = int(self.graphics.environment.height/2*self.graphics.scale + world_x)
@@ -125,7 +133,7 @@ class path_planner:
             self.map_img_np[map_i][map_j][2] =0
             self.map_img_np[map_i][map_j][3] =255
 
-            # ### ADDED — DRAW X MARKS ON EACH PATH POSE ###
+            # Draw X-Marks on each point of path
             # canvas = self.graphics.canvas
             # for pose in self.path.poses:
             #     x = pose.map_j
@@ -133,10 +141,10 @@ class path_planner:
             #     size = 4  # size of X arms
             #     canvas.create_line(x-size, y-size, x+size, y+size, fill="red", width=2)
             #     canvas.create_line(x-size, y+size, x+size, y-size, fill="red", width=2)
-            # ### END ADDITION ###
 
         np.savetxt("file.txt", self.map_img_np[1])
 
+        # Draw lines generated to connect searched nodes
         self.path_img=Image.frombytes('RGBA', (self.map_img_np.shape[1],self.map_img_np.shape[0]), self.map_img_np.astype('b').tostring())
         # self.path_img = toimage(self.map_img_np)
         #self.path_img.show()
@@ -230,13 +238,8 @@ class path_planner:
 
         return new_path        
 
+    # Remove short line segments that disrupt path and ruin fillet generation
     def _remove_short_segments(self, nodes, min_dist=20):
-        """
-        Removes consecutive nodes that are too close together.
-        nodes: list of prm_node in sequence
-        min_dist: minimum allowed distance in pixels
-        Returns: pruned list of nodes
-        """
         if not nodes:
             return nodes
 
@@ -254,6 +257,7 @@ class path_planner:
 
         return new_nodes
 
+    # Removes sharp angles to make path planning smoother
     def _remove_sharp_angles(self, nodes, min_angle_deg=25):
         """
         Removes nodes that create extremely sharp turning angles.
@@ -289,11 +293,8 @@ class path_planner:
         new_nodes.append(nodes[-1])
         return new_nodes
 
+    # Prevent jumps and discontinuities in path generation
     def _remove_collinear(self, nodes, angle_tol_deg=10):
-        """
-        Removes nodes that lie nearly collinear between neighbors.
-        Useful to eliminate stair-step patterns along obstacle boundaries.
-        """
         if len(nodes) <= 2:
             return nodes
 
@@ -325,12 +326,8 @@ class path_planner:
         new_nodes.append(nodes[-1])
         return new_nodes
 
-
+    # Compute the angle changes needed in paths
     def _compute_thetas(self, pts):
-        """
-        pts: list of (map_i, map_j) points (pixel coords)
-        returns: list of (map_i, map_j, theta) with heading angles
-        """
         out = []
         n = len(pts)
         for i in range(n):
@@ -506,7 +503,7 @@ class path_planner:
             ## Breadth-First Search through generated Roadmap
             path_nodes = self._bfs_search(self.start_node, self.goal_node)
 
-            # If BFS failed → retry
+            # If BFS failed, retry
             if not path_nodes:
                 # print("No path found, retrying...")
                 # Reset roadmap before next attempt
@@ -543,7 +540,7 @@ class path_planner:
                 return self.costmap.costmap[i][j] < 255
 
             # Generate smoothed path with circular fillets at corners
-            # --- Ackermann Fillet Path Generation ---
+            # Ackermann Fillet Path Generation
             smooth_points = []
             prev = raw_points[0]
             smooth_points.append(prev)
@@ -577,8 +574,7 @@ class path_planner:
 
                 prev = t2
 
-            # ⬇⬇⬇ ADD THIS AFTER THE LOOP ⬇⬇⬇
-            # final segment to last waypoint
+            # Final segment goes to last waypoint if goal in sight
             smooth_points.extend(interp_line(prev, raw_points[-1], step=0.5))
 
 
@@ -612,7 +608,7 @@ class path_planner:
                 th = pts_with_theta[-1][2]
                 f.write(f"{mi}\t{mj}\t{th}\n")
 
-            ### ADDED — COMPUTE AND PRINT PATH LENGTH ###
+            # Compute and output overall path length
             total_length = 0.0
             for i in range(len(pts_with_theta) - 1):
                 pi = pts_with_theta[i]
@@ -622,8 +618,7 @@ class path_planner:
                 total_length += math.hypot(di, dj)
 
             print(f"[PRM] Final smoothed path length: {total_length:.2f} pixels")
-            ### END ADDITION ###
-
+            
             t_end = time.time()
             print(f"[PRM] Path generated in {t_end - t_start:.3f} seconds")
 
@@ -634,9 +629,6 @@ class path_planner:
             print("Failed to find a path after maximum attempts.")
     
     def debug_draw_prm(self):
-        """
-        Draw ALL PRM nodes and ALL edges on the canvas for visualization.
-        """
         canvas = self.graphics.canvas
 
         # Draw nodes (small blue dots)

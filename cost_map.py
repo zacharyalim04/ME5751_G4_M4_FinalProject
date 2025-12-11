@@ -20,7 +20,7 @@ class cost_map:
         # The default map size is 500 x 500 pixel. In case you want a smaller size for debugging, you can change the value of self.scale.
 
         try:
-            self.load_map(map=f"maps/Monday_medium.png")  # load map, put your own map here
+            self.load_map(map=f"maps/map_final.png")  # load map, put your own map here
         except:
             self.graphics.show_map_button.configure(state="disabled")
             print("no map loaded")  # if fail to find the map png
@@ -29,13 +29,13 @@ class cost_map:
         self.show_map()
         self.compute_costmap()
         self.get_vis_map()
-        self.save_vis_map(map="maps/Monday_medium_vis.png")
-        self.save_costmap(file_path='maps/Monday_medium_cost.txt')
+        self.save_vis_map(map="maps/map_final_vis.png")
+        self.save_costmap(file_path='maps/map_final_cost.txt')
 
     # load occupancy grid into self.map
     # self.map is a numpy 2d array
     # initialize self.costmap, a numpy 2d array, same as self.map
-    def load_map(self, map="maps/Monday_medium.png"):
+    def load_map(self, map="maps/map_final.png"):
         self.map_img = Image.open(map).convert('L')
         self.map_img = self.map_img.resize((int(self.map_width), int(self.map_height)))
         # self.graphics.draw_map(map_img=self.map_img)
@@ -52,7 +52,7 @@ class cost_map:
         self.vis_map = np.copy(self.map)  # map for visualization, intialize same as the map
 
     # save your costmap into a grayscale image
-    def save_vis_map(self, map="maps/Monday_medium_vis.png"):
+    def save_vis_map(self, map="maps/map_final_vis.png"):
         save_img = Image.fromarray(self.vis_map)
         save_img.save(map)
 

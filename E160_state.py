@@ -63,12 +63,12 @@ class E160_state:
 		self.phi_r = phi_r
 
 
-	# transfer local velocity to global velocity
+	# Transfer local velocity to global velocity
 	def _get_global_velocity(self,dx,dy):
-		# velocity transform matrix T_v
+		# Velocity transform matrix T_v
 		T_v = np.array([[math.cos(self.theta),-math.sin(self.theta),0],[math.sin(self.theta),math.cos(self.theta),0],[0,0,1]])
 
-		#local velocity vector
+		# Local velocity vector
 		v_v = np.array([dx,dy,.0])
 
 		dxi,dyi,_=T_v @ v_v

@@ -361,6 +361,8 @@ class controller:
                     c_v *= scale
                     c_w *= scale   # preserve curvature w/v
 
+
+            ### ----- Ackermann Constraints ----- ###
             # Ackermann Wheel Speeds
             # Converts (v, w) → inside/outside wheel speeds
             if self.robot.state.vehicle == "v":
